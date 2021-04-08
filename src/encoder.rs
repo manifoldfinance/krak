@@ -78,7 +78,7 @@ pub extern "C" fn encode_table(
                             KVal::String(syf) => {
                                 record.push((key, Value::String(syf.parse().unwrap())))
                             }
-                            _ => println!("No string symbol"),
+                            _ => record.push((key, Value::Null))
                         },
                         _ => println!("Unrecognized Col"),
                     }
