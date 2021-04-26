@@ -1,9 +1,19 @@
+use schema_registry_converter::blocking::schema_registry::SrSettings;
 use std::env;
 
-pub fn get_schema_registry() -> String {
-    let schema_reg_host = env::var("SCHEMA_REG_HOST").expect("schema reg host not defined");
-    let schema_reg_port = env::var("SCHEMA_REG_PORT").expect("schema reg port not defined");
-    let conn = format!("{}:{}", schema_reg_host, schema_reg_port);
-    println!("Using Schema Registry : {}", conn);
-    conn
+fn schema_registry_address() -> String {
+    let address = match env::var_os("SCHEMA_REGISTRY_URI") {
+        Some(val) => val.into_string().expect("SCHEMA_REGISTRY_URI not defined"),
+        None => "http://localhost:8081".to_owned(),
+    };
+    address
+}
+
+pub fn avro_sr_settings() -> SrSettings {
+    let sr_address = schema_registry_address();
+    println!(
+        "Creating Avro Settings with Schema Registry URI -> {}",
+        &sr_address
+    );
+    return SrSettings::new(sr_address);
 }

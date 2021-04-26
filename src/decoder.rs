@@ -1,34 +1,34 @@
-use crate::util::*;
+use crate::util::avro_sr_settings;
+
 use avro_rs::types::Value;
 use lazy_static::lazy_static;
-use rkdb::kbindings::{kdict, kvoid, KData, KVal};
-use rkdb::types::K;
-use schema_registry_converter::Decoder;
+use rkdb::{
+    kbindings::{kdict, kvoid, KData, KVal},
+    types::K,
+};
+use schema_registry_converter::blocking::avro::AvroDecoder;
 use std::sync::Mutex;
 
 lazy_static! {
-    static ref DECODER: Mutex<Decoder> =
-        Mutex::new(Decoder::new(get_schema_registry().to_string()));
+    static ref DECODER: Mutex<AvroDecoder> = Mutex::new(AvroDecoder::new(avro_sr_settings()));
 }
 
 #[no_mangle]
-pub extern "C" fn decode(enumasint: *const K, msg: *const K) -> *const K {
+pub extern "C" fn decode(msg: *const K) -> *const K {
     let mut result = kvoid();
-    let mut easint = false;
-    if let KVal::Bool(KData::Atom(b)) = KVal::new(enumasint) {
-        easint = b.to_owned();
-    }
+
     if let KVal::Byte(KData::List(m)) = KVal::new(msg) {
-        result = parse_msg(m, easint);
+        result = parse_msg(m);
     } else {
         println!("MSG not a byte array")
     }
+
     result
 }
 
-fn parse_msg(data: &[u8], enumasint: bool) -> *const K {
+fn parse_msg(data: &[u8]) -> *const K {
     let mut result = kvoid();
-    let payload = DECODER.lock().unwrap().decode(Some(data)).unwrap();
+    let payload = DECODER.lock().unwrap().decode(Some(data)).unwrap().value;
     match payload {
         Value::Record(mut v) => {
             let mut keys: Vec<String> = Vec::new();
@@ -41,11 +41,11 @@ fn parse_msg(data: &[u8], enumasint: bool) -> *const K {
                     Value::Array(arr) => {
                         let mut rows: Vec<KVal> = Vec::new();
                         for a in arr.into_iter() {
-                            rows.push(parse_msgtype(a, enumasint));
+                            rows.push(parse_msgtype(a));
                         }
                         values.push(KVal::Mixed(rows));
                     }
-                    _ => values.push(parse_msgtype(v, enumasint)),
+                    _ => values.push(parse_msgtype(v)),
                 }
             }
             let kkeys = KVal::Symbol(KData::List(&mut keys));
@@ -58,7 +58,7 @@ fn parse_msg(data: &[u8], enumasint: bool) -> *const K {
     result
 }
 
-fn parse_msgtype(val: &mut Value, enumasint: bool) -> KVal {
+fn parse_msgtype(val: &mut Value) -> KVal {
     match val {
         Value::Int(i) => KVal::Int(KData::Atom(i)),
         Value::Long(l) => KVal::Long(KData::Atom(l)),
@@ -67,20 +67,14 @@ fn parse_msgtype(val: &mut Value, enumasint: bool) -> KVal {
         Value::Boolean(b) => KVal::Bool(KData::Atom(b)),
         Value::String(s) => KVal::String(&s[0..]),
         Value::Null => KVal::String("null"),
-        Value::Enum(i, s) => {
-            if enumasint {
-                KVal::Int(KData::Atom(i))
-            } else {
-                KVal::Symbol(KData::Atom(s))
-            }
-        }
-        Value::Union(box u) => parse_msgtype(u, enumasint),
+        Value::Enum(_i, s) => KVal::Symbol(KData::Atom(s)),
+        Value::Union(box u) => parse_msgtype(u),
         Value::Record(records) => {
             let mut keys: Vec<KVal> = Vec::new();
             let mut values: Vec<KVal> = Vec::new();
             for (key, val) in records.into_iter() {
                 keys.push(KVal::Symbol(KData::Atom(key)));
-                values.push(parse_msgtype(val, enumasint));
+                values.push(parse_msgtype(val));
             }
             KVal::Dict(Box::new(KVal::Mixed(keys)), Box::new(KVal::Mixed(values)))
         }
@@ -89,7 +83,7 @@ fn parse_msgtype(val: &mut Value, enumasint: bool) -> KVal {
             let mut values: Vec<KVal> = Vec::new();
             for (key, val) in map.into_iter() {
                 keys.push(KVal::String(key));
-                values.push(parse_msgtype(val, enumasint));
+                values.push(parse_msgtype(val));
             }
             KVal::Dict(Box::new(KVal::Mixed(keys)), Box::new(KVal::Mixed(values)))
         }

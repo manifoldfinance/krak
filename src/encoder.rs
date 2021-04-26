@@ -1,14 +1,15 @@
-use crate::util::*;
+use crate::util::avro_sr_settings;
+
 use avro_rs::types::Value;
 use lazy_static::lazy_static;
 use rkdb::{kbindings::*, types::*};
-use schema_registry_converter::schema_registry::SubjectNameStrategy;
-use schema_registry_converter::Encoder;
+use schema_registry_converter::{
+    blocking::avro::AvroEncoder, schema_registry_common::SubjectNameStrategy,
+};
 use std::sync::Mutex;
 
 lazy_static! {
-    static ref ENCODER: Mutex<Encoder> =
-        Mutex::new(Encoder::new(get_schema_registry().to_string()));
+    pub static ref ENCODER: Mutex<AvroEncoder> = Mutex::new(AvroEncoder::new(avro_sr_settings()));
 }
 
 #[no_mangle]
@@ -20,9 +21,11 @@ pub extern "C" fn encode(
 ) -> *const K {
     let mut data = encode_table(topic, tbl, rows, colnames);
     let mut result: Vec<KVal> = Vec::new();
+
     for row in data.iter_mut() {
         result.push(KVal::Byte(KData::List(row)));
     }
+
     let kret = kmixed(&result);
     kret
 }
@@ -36,17 +39,20 @@ pub extern "C" fn encode_table(
     colnames: *const K,
 ) -> Vec<Vec<u8>> {
     let mut result: Vec<Vec<u8>> = Vec::new();
-    let mut nr = 0;
     let mut cnames: Vec<String> = Vec::new();
     let mut tpc = String::new();
+    let mut nr = 0;
+
     if let KVal::String(t) = KVal::new(topic) {
         println!("topic received: {}", t);
         tpc.push_str(t);
     }
+
     match KVal::new(rows) {
         KVal::Int(KData::Atom(r)) => nr = *r,
         _ => println!("Invalid rows"),
     };
+
     if let KVal::Mixed(v) = KVal::new(colnames) {
         for i in v.iter() {
             if let KVal::String(s) = i {
@@ -54,6 +60,7 @@ pub extern "C" fn encode_table(
             }
         }
     }
+
     match KVal::new(tbl) {
         KVal::Table(box KVal::Dict(_, box KVal::Mixed(cols))) => {
             let mut records: Vec<Vec<(&'static str, Value)>> = Vec::new();
@@ -78,7 +85,7 @@ pub extern "C" fn encode_table(
                             KVal::String(syf) => {
                                 record.push((key, Value::String(syf.parse().unwrap())))
                             }
-                            _ => record.push((key, Value::Null))
+                            _ => record.push((key, Value::Null)),
                         },
                         _ => println!("Unrecognized Col"),
                     }
@@ -89,6 +96,7 @@ pub extern "C" fn encode_table(
         }
         _ => println!("No Table"),
     };
+
     result
 }
 
